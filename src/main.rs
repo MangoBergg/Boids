@@ -2,10 +2,13 @@ use macroquad::prelude::*;
 
 const BOID_COUNT: usize = 150;
 const MAX_SPEED: f32 = 4.0;
+const MAX_FORCE: f32 = 0.15;
+const PERSONAL_SPACE: f32 = 25.0;
 
 struct Boid {
     position: Vec2,
     velocity: Vec2,
+    acceleration: Vec2,
 }
 
 impl Boid {
@@ -17,11 +20,15 @@ impl Boid {
         Self {
             position: Vec2::new(x, y),
             velocity,
+	    acceleration: Vec2::ZERO,
         }
     }
 
     fn update(&mut self) {
+	self.velocity += self.acceleration;
+	self.velocity = self.velocity.clamp_length_max(MAX_SPEED);
         self.position += self.velocity;
+	self.acceleration = Vec2::ZERO;
 
         // Screen wrapping
         if self.position.x < 0.0 { self.position.x = screen_width(); }
@@ -48,7 +55,44 @@ async fn main() {
     loop {
         clear_background(Color::new(0.08, 0.09, 0.1, 1.0));
 
-        for boid in flock.iter_mut() {
+        let current_positions: Vec<Vec2> = flock.iter().map(|b| b.position).collect();
+        
+	for boid in flock.iter_mut() {
+            let mut steering_force = Vec2{x: 0.0, y: 0.0};
+            let mut neighbor_count = 0;
+
+            for &other_pos in current_positions.iter() {
+                if boid.position == other_pos {
+                    continue;
+                }
+
+                let distance = boid.position.distance(other_pos);
+
+                if distance < PERSONAL_SPACE && distance > 0.0 {
+                    let mut away_vector = boid.position - other_pos;
+
+                    // Closer boids push harder?
+                    away_vector = away_vector.normalize() / distance;
+
+                    steering_force += away_vector;
+                    neighbor_count += 1;
+                }
+            }
+
+            if neighbor_count > 0 {
+		steering_force /= neighbor_count as f32;
+
+		if steering_force.length_squared() > 0.0 {
+		    let desired_velocity = steering_force.normalize() * MAX_SPEED;
+		    let steer = desired_velocity - boid.velocity;
+		    steering_force = steer.clamp_length_max(MAX_FORCE);
+		}
+	    } else {
+		steering_force = Vec2::ZERO;
+            }
+
+            boid.acceleration += steering_force;
+
             boid.update();
             boid.draw();
         }
